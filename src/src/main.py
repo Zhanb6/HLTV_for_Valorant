@@ -1,34 +1,28 @@
-# main.py — Valorant Stats (Assignment #1)
-# Python 3 + mysql-connector-python
-
+# main.py — Valorant Stats (Assignment #1)  |  uses .env
 import mysql.connector
-import csv
+import csv, os
+from dotenv import load_dotenv
 
-# ⚡ Укажи свои данные для подключения
-DB_HOST = "127.0.0.1"
-DB_PORT = 3306
-DB_USER = "root"          # или твой пользователь
-DB_PASS = "asikerka1024!" # замени на свой пароль
-DB_NAME = "valorant_stats"
+# load .env from project root
+load_dotenv()
+
+DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASS = os.getenv("DB_PASS", "")
+DB_NAME = os.getenv("DB_NAME", "valorant_stats")
 
 def run_and_save(cur, sql, filename, limit_print=10):
-    """Выполнить запрос, вывести в консоль и сохранить в CSV"""
     cur.execute(sql)
     rows = cur.fetchall()
-    cols = [desc[0] for desc in cur.description]
-
-    # Вывод в терминал
+    cols = [d[0] for d in cur.description]
     print("\n>>>", sql.strip().splitlines()[0][:60], "...")
     print("Columns:", cols)
     for i, r in enumerate(rows[:limit_print], start=1):
         print(f"{i:>2}: {r}")
     print("Всего строк:", len(rows))
-
-    # Сохранение в CSV
     with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(cols)
-        writer.writerows(rows)
+        w = csv.writer(f); w.writerow(cols); w.writerows(rows)
     print(f"Сохранено в {filename}")
 
 def main():
@@ -38,7 +32,6 @@ def main():
         database=DB_NAME, charset="utf8mb4"
     )
     cur = conn.cursor()
-
     queries = [
         ("SELECT * FROM v_maps LIMIT 10;", "query1_maps_sample.csv"),
         ("""
@@ -62,12 +55,9 @@ def main():
         LIMIT 15;
         """, "query3_kd_leaderboard.csv")
     ]
-
     for sql, filename in queries:
         run_and_save(cur, sql, filename)
-
-    cur.close()
-    conn.close()
+    cur.close(); conn.close()
 
 if __name__ == "__main__":
     main()
