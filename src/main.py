@@ -140,6 +140,30 @@ def main():
          AND g.map        = m.map
         LIMIT 12;
         """, "query4_join_games.csv")
+         ("""  -- team winrate summary
+    WITH all_maps AS (
+      SELECT team_a AS team, team_a_score AS sc_a, team_b_score AS sc_b FROM v_maps
+      UNION ALL
+      SELECT team_b,         team_b_score,     team_a_score     FROM v_maps
+    )
+    SELECT team, COUNT(*) AS games, SUM(sc_a > sc_b) AS wins, SUM(sc_a < sc_b) AS losses,
+           ROUND(AVG((sc_a > sc_b))*100, 1) AS winrate_pct,
+           ROUND(AVG(sc_a - sc_b), 2) AS avg_score_diff
+    FROM all_maps
+    GROUP BY team
+    HAVING COUNT(*) >= 5
+    ORDER BY winrate_pct DESC, games DESC;
+    """, "query5_team_winrate.csv"),
+    ("""  -- popular maps
+    SELECT map, COUNT(*) AS games,
+           ROUND(AVG(duration_sec)/60, 1) AS avg_duration_min,
+           ROUND(AVG(score_diff), 2) AS avg_score_diff
+    FROM v_maps
+    WHERE map <> 'All Maps'
+    GROUP BY map
+    ORDER BY games DESC, avg_duration_min DESC;
+    """, "query6_map_popularity.csv"),
+
     ]
     for sql, filename in queries:
         run_and_save(cur, sql, filename)
