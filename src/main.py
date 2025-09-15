@@ -1,12 +1,15 @@
-# main.py — Valorant Stats (self-healing views + CSV)
+# main.py — Valorant Stats (self-healing views + CSV) + .env
 import mysql.connector
-import csv
+import csv, os
+from dotenv import load_dotenv
 
-DB_HOST = "127.0.0.1"
-DB_PORT = 3306
-DB_USER = "root"          # замени при необходимости
-DB_PASS = "asikerka1024!" # замени на твой пароль
-DB_NAME = "valorant_stats"
+load_dotenv()  # подхватывает .env из корня
+
+DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASS = os.getenv("DB_PASS", "")
+DB_NAME = os.getenv("DB_NAME", "valorant_stats")
 
 def run_and_save(cur, sql, filename, limit_print=10):
     cur.execute(sql)
