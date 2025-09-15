@@ -1,0 +1,99 @@
+1.
+WITH all_maps AS (
+  SELECT team_a AS team, team_a_score AS sc_a, team_b_score AS sc_b FROM v_maps
+  UNION ALL
+  SELECT team_b,         team_b_score,     team_a_score     FROM v_maps
+)
+SELECT
+  team,
+  COUNT(*)                              AS games,
+  SUM(sc_a > sc_b)                      AS wins,
+  SUM(sc_a < sc_b)                      AS losses,
+  ROUND(AVG((sc_a > sc_b))*100, 1)      AS winrate_pct,
+  ROUND(AVG(sc_a - sc_b), 2)            AS avg_score_diff
+FROM all_maps
+GROUP BY team
+HAVING COUNT(*) >= 5
+ORDER BY winrate_pct DESC, games DESC;
+
+2.
+WITH all_maps AS (
+  SELECT map, team_a AS team, team_a_score, team_b_score FROM v_maps
+  UNION ALL
+  SELECT map, team_b,         team_b_score, team_a_score FROM v_maps
+)
+SELECT
+  map, team,
+  COUNT(*)                                           AS games,
+  SUM(team_a_score > team_b_score)                   AS wins,
+  ROUND(AVG(team_a_score > team_b_score)*100, 1)     AS winrate_pct
+FROM all_maps
+WHERE map <> 'All Maps'
+GROUP BY map, team
+HAVING COUNT(*) >= 3
+ORDER BY winrate_pct DESC, games DESC, map;
+
+3.
+SELECT
+  map,
+  COUNT(*) AS games,
+  ROUND(AVG(duration_sec)/60, 1) AS avg_duration_min,
+  ROUND(AVG(score_diff), 2)      AS avg_score_diff
+FROM v_maps
+WHERE map <> 'All Maps'
+GROUP BY map
+ORDER BY games DESC, avg_duration_min DESC;
+
+4.
+SELECT
+  tournament, stage, match_name, map,
+  COALESCE(NULLIF(team_a_ot, ''), '0') AS team_a_ot,
+  COALESCE(NULLIF(team_b_ot, ''), '0') AS team_b_ot,
+  duration_raw
+FROM v_maps
+WHERE (NULLIF(team_a_ot, '') IS NOT NULL) OR (NULLIF(team_b_ot, '') IS NOT NULL)
+ORDER BY duration_sec DESC;
+
+5.
+SELECT
+  tournament, stage, match_name, map,
+  winner_team, score_diff, duration_raw
+FROM v_maps
+WHERE score_diff >= 7 AND map <> 'All Maps'
+ORDER BY score_diff DESC, duration_sec DESC;
+
+6.
+SELECT
+  player, enemy,
+  SUM(difference)            AS diff_vs_enemy,
+  SUM(player_kills)          AS kills_for,
+  SUM(enemy_kills)           AS kills_against
+FROM v_kills
+GROUP BY player, enemy
+HAVING SUM(difference) >= 8
+ORDER BY diff_vs_enemy DESC, kills_for DESC;
+
+7.
+SELECT
+  player,
+  SUM(player_kills) AS total_kills
+FROM v_kills
+GROUP BY player
+ORDER BY total_kills DESC
+LIMIT 20;
+
+8.
+WITH all_maps AS (
+  SELECT stage, team_a AS team, team_a_score, team_b_score FROM v_maps
+  UNION ALL
+  SELECT stage, team_b,         team_b_score, team_a_score FROM v_maps
+)
+SELECT
+  stage, team,
+  COUNT(*)                                       AS games,
+  SUM(team_a_score > team_b_score)               AS wins,
+  ROUND(AVG(team_a_score > team_b_score)*100,1)  AS winrate_pct
+FROM all_maps
+GROUP BY stage, team
+HAVING COUNT(*) >= 3
+ORDER BY stage, winrate_pct DESC, games DESC;
