@@ -1,174 +1,239 @@
-# main.py — Valorant Stats (self-healing views + CSV) + .env
-import mysql.connector
-import csv, os
-from dotenv import load_dotenv
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Valorant analytics (simplified): run PURE SQL queries for global, team, nemesis, per_map, mvp, tournament_stars
+"""
 
-load_dotenv()  # подхватывает .env из корня
+import os
+import sys
+import argparse
+import datetime as dt
+from typing import Optional, Sequence
 
-DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
-DB_PORT = int(os.getenv("DB_PORT", "3306"))
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASS = os.getenv("DB_PASS", "")
-DB_NAME = os.getenv("DB_NAME", "valorant_stats")
+import pandas as pd
+import mysql.connector as mysql
+import getpass
 
-def run_and_save(cur, sql, filename, limit_print=10):
-    cur.execute(sql)
-    rows = cur.fetchall()
-    cols = [d[0] for d in cur.description]
-    print("\n>>>", sql.strip().splitlines()[0][:70], "...")
-    print("Columns:", cols)
-    for i, r in enumerate(rows[:limit_print], 1):
-        print(f"{i:>2}: {r}")
-    print("Всего строк:", len(rows))
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f); w.writerow(cols); w.writerows(rows)
-    print(f"CSV: {filename}")
+# ---------- Utils ----------
 
-def ensure_views(cur, conn):
-    # покажем, куда подключились
-    cur.execute("SELECT DATABASE(), @@port, @@hostname, VERSION()")
-    db, port, host, ver = cur.fetchone()
-    print(f"Connected to DB={db}, host={host}, port={port}, version={ver}")
+def ensure_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
 
-    # создаём/обновляем вьюхи (идемпотентно)
-    cur.execute("""
-    CREATE OR REPLACE VIEW v_maps AS
-    SELECT
-      `Tournament`  AS tournament,
-      `Stage`       AS stage,
-      `Match Type`  AS match_type,
-      `Match Name`  AS match_name,
-      `Map`         AS map,
-      `Team A`      AS team_a,
-      `Team A Score`              AS team_a_score,
-      `Team A Attacker Score`     AS team_a_attacker,
-      `Team A Defender Score`     AS team_a_defender,
-      `Team A Overtime Score`     AS team_a_ot,
-      `Team B`      AS team_b,
-      `Team B Score`              AS team_b_score,
-      `Team B Attacker Score`     AS team_b_attacker,
-      `Team B Defender Score`     AS team_b_defender,
-      `Team B Overtime Score`     AS team_b_ot,
-      `Duration`    AS duration_raw,
-      CASE WHEN `Duration` LIKE '%:%:%'
-           THEN TIME_TO_SEC(STR_TO_DATE(`Duration`, '%H:%i:%s'))
-           ELSE TIME_TO_SEC(STR_TO_DATE(`Duration`, '%i:%s'))
-      END AS duration_sec,
-      CASE
-        WHEN `Team A Score` > `Team B Score` THEN `Team A`
-        WHEN `Team B Score` > `Team A Score` THEN `Team B`
-        ELSE 'TIE'
-      END AS winner_team,
-      ABS(`Team A Score` - `Team B Score`) AS score_diff
-    FROM maps_scores;
-    """)
-    cur.execute("""
-    CREATE OR REPLACE VIEW v_kills AS
-    SELECT
-      `Tournament`   AS tournament,
-      `Stage`        AS stage,
-      `Match Type`   AS match_type,
-      `Match Name`   AS match_name,
-      `Map`          AS map,
-      `Player Team`  AS player_team,
-      `Player`       AS player,
-      `Enemy Team`   AS enemy_team,
-      `Enemy`        AS enemy,
-      `Player Kills` AS player_kills,
-      `Enemy Kills`  AS enemy_kills,
-      `Difference`   AS difference,
-      `Kill Type`    AS kill_type
-    FROM kills;
-    """)
-    cur.execute("""
-    CREATE OR REPLACE VIEW v_games AS
-    SELECT
-      `Tournament`   AS tournament,
-      `Stage`        AS stage,
-      `Match Type`   AS match_type,
-      `Match Name`   AS match_name,
-      `Map`          AS map,
-      `Match ID`     AS match_id,
-      `Game ID`      AS game_id
-    FROM tournaments_stages_matches_games_ids;
-    """)
-    conn.commit()
+# ---------- DB helpers ----------
 
-def main():
-    conn = mysql.connector.connect(
-        host=DB_HOST, port=DB_PORT,
-        user=DB_USER, password=DB_PASS,
-        database=DB_NAME, charset="utf8mb4"
+def get_conn(host: str, port: int, user: str, password: str, db: str):
+    return mysql.connect(host=host, port=port, user=user, password=password, database=db)
+
+def run_query(conn, sql: str, params: Optional[Sequence] = None) -> pd.DataFrame:
+    return pd.read_sql(sql, conn, params=params or [])
+
+# ---------- CLI ----------
+
+def parse_args(argv: Optional[Sequence[str]] = None):
+    p = argparse.ArgumentParser(description="Valorant analytics from MySQL 'kills' table (pure SQL)")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=3306)
+    p.add_argument("--user", default="root")
+    p.add_argument("--password", default="", help="MySQL password")
+    p.add_argument("--db", default="valorant_stats")
+
+    # what to run
+    p.add_argument(
+        "--run",
+        default="global,team,nemesis,per_map,mvp,tournament_stars",
+        help="Comma-separated: global,team,nemesis,per_map,mvp,tournament_stars (per_map/tournament_stars top-K uses --top-n)"
     )
-    cur = conn.cursor()
 
-    ensure_views(cur, conn)
+    # knobs
+    p.add_argument("--min-matches", type=int, default=2, help="min matches for global ranking & per_map/tournament_stars")
+    p.add_argument("--top-n", type=int, default=20, help="LIMIT for global/nemesis, top-K per map/tournament_stars")
 
-    queries = [
-        ("SELECT * FROM v_maps LIMIT 10;", "query1_maps_sample.csv"),
-        ("""
-        SELECT tournament, match_name, map,
-               ROUND(duration_sec/60,1) AS duration_min,
-               winner_team, score_diff
-        FROM v_maps
-        WHERE map <> 'All Maps'
-        ORDER BY duration_sec DESC
-        LIMIT 10;
-        """, "query2_longest_maps.csv"),
-        ("""
-        SELECT player,
-               SUM(player_kills) AS kills,
-               SUM(enemy_kills)  AS deaths,
-               ROUND(SUM(player_kills) / NULLIF(SUM(enemy_kills),0), 2) AS kd
-        FROM v_kills
-        GROUP BY player
-        HAVING SUM(player_kills) >= 50
-        ORDER BY kd DESC, kills DESC
-        LIMIT 15;
-        """, "query3_kd_leaderboard.csv"),
-        ("""
+    # output
+    p.add_argument("--outdir", default="outputs", help="Root output directory for CSVs")
+    return p.parse_args(argv)
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_args(argv)
+
+    # open connection
+    conn = get_conn(
+        host=args.host,
+        port=args.port,
+        user=args.user,
+        password=(args.password or getpass.getpass("MySQL password: ")),
+        db=args.db,
+    )
+
+    ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_root = os.path.join(args.outdir, ts)
+    ensure_dir(out_root)
+
+    to_run = [x.strip().lower() for x in args.run.split(",") if x.strip()]
+
+    def save_df(df: pd.DataFrame, name: str):
+        if df is None or df.empty:
+            print(f"\n== {name} ==\n<empty>")
+            return
+        print(f"\n== {name} ==")
+        print(df.head(30).to_string(index=False))
+        path = os.path.join(out_root, f"{name}.csv")
+        df.to_csv(path, index=False, encoding="utf-8")
+        print(f"[saved] {path}")
+
+    # ---------- SQL queries ----------
+
+    min_matches = int(args.min_matches)
+    top_n = int(args.top_n)
+
+    # 1) GLOBAL KD
+    sql_global = f"""
+        WITH agg AS (
+          SELECT
+            `Player` AS player,
+            COUNT(DISTINCT `Match Name`)      AS matches_played,
+            SUM(COALESCE(`Player Kills`,0))   AS kills_total,
+            SUM(COALESCE(`Enemy Kills`,0))    AS deaths_total
+          FROM kills
+          GROUP BY `Player`
+        )
         SELECT
-          m.tournament, m.match_name, m.map,
-          g.game_id, g.match_id,
-          m.winner_team, m.score_diff
-        FROM v_maps m
-        JOIN v_games g
-          ON g.tournament = m.tournament
-         AND g.stage      = m.stage
-         AND g.match_type = m.match_type
-         AND g.match_name = m.match_name
-         AND g.map        = m.map
-        LIMIT 12;
-        """, "query4_join_games.csv")
-         ("""  -- team winrate summary
-    WITH all_maps AS (
-      SELECT team_a AS team, team_a_score AS sc_a, team_b_score AS sc_b FROM v_maps
-      UNION ALL
-      SELECT team_b,         team_b_score,     team_a_score     FROM v_maps
-    )
-    SELECT team, COUNT(*) AS games, SUM(sc_a > sc_b) AS wins, SUM(sc_a < sc_b) AS losses,
-           ROUND(AVG((sc_a > sc_b))*100, 1) AS winrate_pct,
-           ROUND(AVG(sc_a - sc_b), 2) AS avg_score_diff
-    FROM all_maps
-    GROUP BY team
-    HAVING COUNT(*) >= 5
-    ORDER BY winrate_pct DESC, games DESC;
-    """, "query5_team_winrate.csv"),
-    ("""  -- popular maps
-    SELECT map, COUNT(*) AS games,
-           ROUND(AVG(duration_sec)/60, 1) AS avg_duration_min,
-           ROUND(AVG(score_diff), 2) AS avg_score_diff
-    FROM v_maps
-    WHERE map <> 'All Maps'
-    GROUP BY map
-    ORDER BY games DESC, avg_duration_min DESC;
-    """, "query6_map_popularity.csv"),
+          player, matches_played, kills_total, deaths_total,
+          ROUND(kills_total / NULLIF(deaths_total, 0), 3) AS kd
+        FROM agg
+        WHERE matches_played >= {min_matches}
+        ORDER BY kd DESC, kills_total DESC
+        LIMIT {top_n};
+    """
 
-    ]
-    for sql, filename in queries:
-        run_and_save(cur, sql, filename)
+    # 2) TEAM KD
+    sql_team = """
+        SELECT
+          `Player Team` AS Team,
+          SUM(COALESCE(`Player Kills`,0)) AS team_kills,
+          SUM(COALESCE(`Enemy Kills`,0))  AS team_deaths,
+          ROUND(SUM(COALESCE(`Player Kills`,0)) / NULLIF(SUM(COALESCE(`Enemy Kills`,0)), 0), 3) AS team_kd
+        FROM kills
+        WHERE `Player Team` IS NOT NULL AND `Player Team` <> ''
+        GROUP BY `Player Team`
+        ORDER BY team_kd DESC, team_kills DESC;
+    """
 
-    cur.close(); conn.close()
+    # 3) NEMESIS
+    sql_nemesis = f"""
+        SELECT
+          `Player` AS player,
+          `Enemy`  AS enemy,
+          SUM(COALESCE(`Enemy Kills`,0))  AS deaths_from_enemy,
+          SUM(COALESCE(`Player Kills`,0)) AS kills_on_enemy
+        FROM kills
+        GROUP BY `Player`, `Enemy`
+        ORDER BY deaths_from_enemy DESC
+        LIMIT {top_n};
+    """
+
+    # 4) PER MAP KD
+    sql_per_map = f"""
+        WITH per_map AS (
+          SELECT
+            `Map`                        AS map_name,
+            `Player`                     AS player,
+            COUNT(DISTINCT `Match Name`) AS matches_played,
+            SUM(COALESCE(`Player Kills`,0)) AS kills_total,
+            SUM(COALESCE(`Enemy Kills`,0))  AS deaths_total,
+            SUM(COALESCE(`Player Kills`,0)) / NULLIF(SUM(COALESCE(`Enemy Kills`,0)), 0) AS kd
+          FROM kills
+          WHERE `Map` IS NOT NULL AND `Map` <> ''
+          GROUP BY `Map`, `Player`
+        ),
+        ranked AS (
+          SELECT
+            per_map.*,
+            ROW_NUMBER() OVER (PARTITION BY map_name ORDER BY kd DESC, kills_total DESC) AS rk
+          FROM per_map
+          WHERE matches_played >= {min_matches}
+        )
+        SELECT map_name, player, matches_played, kills_total, deaths_total, ROUND(kd,3) AS kd
+        FROM ranked
+        WHERE rk <= {top_n}
+        ORDER BY map_name, rk;
+    """
+
+    # 5) MATCH MVP
+    sql_mvp = """
+        WITH per_match AS (
+          SELECT
+            `Match Name` AS match_name,
+            `Player`     AS player,
+            MAX(`Player Team`) AS team,
+            SUM(COALESCE(`Player Kills`,0)) AS kills_in_match,
+            SUM(COALESCE(`Enemy Kills`,0))  AS deaths_in_match,
+            SUM(COALESCE(`Player Kills`,0)) / NULLIF(SUM(COALESCE(`Enemy Kills`,0)), 0) AS kd
+          FROM kills
+          WHERE `Match Name` IS NOT NULL AND `Match Name` <> ''
+          GROUP BY `Match Name`, `Player`
+        ), ranked AS (
+          SELECT
+            per_match.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY match_name
+              ORDER BY kills_in_match DESC, deaths_in_match ASC, player ASC
+            ) AS rk
+          FROM per_match
+        )
+        SELECT match_name, player, team, kills_in_match, deaths_in_match, ROUND(kd,3) AS kd
+        FROM ranked
+        WHERE rk = 1
+        ORDER BY match_name;
+    """
+
+    # 6) TOURNAMENT STARS
+    sql_tournament_stars = f"""
+        WITH per_t AS (
+          SELECT
+            `Tournament` AS tournament,
+            `Player`     AS player,
+            COUNT(DISTINCT `Match Name`)     AS matches_played,
+            SUM(COALESCE(`Player Kills`,0))  AS kills_total,
+            SUM(COALESCE(`Enemy Kills`,0))   AS deaths_total,
+            SUM(COALESCE(`Player Kills`,0)) / NULLIF(SUM(COALESCE(`Enemy Kills`,0)),0) AS kd
+          FROM kills
+          WHERE `Tournament` IS NOT NULL AND `Tournament` <> ''
+          GROUP BY `Tournament`, `Player`
+        ), ranked AS (
+          SELECT
+            per_t.*,
+            ROW_NUMBER() OVER (PARTITION BY tournament ORDER BY kd DESC, kills_total DESC) AS rk
+          FROM per_t
+          WHERE matches_played >= {min_matches}
+        )
+        SELECT tournament, player, matches_played, kills_total, deaths_total, ROUND(kd,3) AS kd
+        FROM ranked
+        WHERE rk <= {top_n}
+        ORDER BY tournament, rk;
+    """
+
+    # ---------- Execute selected ----------
+    if "global" in to_run:
+        save_df(run_query(conn, sql_global), "global_kd")
+
+    if "team" in to_run:
+        save_df(run_query(conn, sql_team), "team_kd")
+
+    if "nemesis" in to_run:
+        save_df(run_query(conn, sql_nemesis), "nemesis")
+
+    if "per_map" in to_run:
+        save_df(run_query(conn, sql_per_map), "per_map_kd")
+
+    if "mvp" in to_run:
+        save_df(run_query(conn, sql_mvp), "match_mvp")
+
+    if "tournament_stars" in to_run:
+        save_df(run_query(conn, sql_tournament_stars), "tournament_stars")
+
+    conn.close()
+    print(f"\nDone. CSVs saved to: {out_root}")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
