@@ -15,3 +15,8 @@ VCT 2025 (матчи, карты, киллы, эко-раунды). Файлы �
    CREATE DATABASE valorant_stats DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci;
    USE valorant_stats;
    ```
+ ## How to connect to database
+ ```sql
+\sql
+\connect root@localhost:3306
+show databases;
