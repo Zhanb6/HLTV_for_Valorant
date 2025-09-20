@@ -20,3 +20,4 @@ VCT 2025 (матчи, карты, киллы, эко-раунды). Файлы �
 \sql
 \connect root@localhost:3306
 show databases;
+use valorant_stats;
