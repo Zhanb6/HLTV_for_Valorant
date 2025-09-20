@@ -185,6 +185,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         WHERE rk = 1
         ORDER BY match_name;
     """
+    sql_map_specialists = f"""
+WITH per_map AS (
+  SELECT
+    `Map` AS map_name,
+    `Player` AS player,
+    COUNT(DISTINCT `Match Name`) AS matches_played,
+    SUM(COALESCE(`Player Kills`,0)) AS kills_total,
+    SUM(COALESCE(`Enemy Kills`,0))  AS deaths_total,
+    SUM(COALESCE(`Player Kills`,0)) / NULLIF(SUM(COALESCE(`Enemy Kills`,0)),0) AS kd
+  FROM kills
+  WHERE `Map` IS NOT NULL AND `Map` <> ''
+  GROUP BY `Map`, `Player`
+),
+ranked AS (
+  SELECT
+    per_map.*,
+    ROW_NUMBER() OVER (PARTITION BY map_name ORDER BY kd DESC, kills_total DESC) AS rk
+  FROM per_map
+  WHERE matches_played >= {min_matches}
+)
+SELECT map_name, player, matches_played, kills_total, deaths_total, ROUND(kd,3) AS kd
+FROM ranked
+WHERE rk <= {min(5, top_n)}
+ORDER BY map_name, rk;
+"""
+
+
 
     # 6) TOURNAMENT STARS
     sql_tournament_stars = f"""
@@ -211,6 +238,94 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         WHERE rk <= {top_n}
         ORDER BY tournament, rk;
     """
+    sql_consistency = f"""
+WITH per_match AS (
+  SELECT
+    `Player` AS player,
+    `Match Name` AS match_name,
+    SUM(COALESCE(`Player Kills`,0)) AS kills_in_match
+  FROM kills
+  WHERE `Match Name` IS NOT NULL AND `Match Name` <> ''
+  GROUP BY `Player`, `Match Name`
+),
+agg AS (
+  SELECT
+    player,
+    COUNT(*) AS matches_played,
+    ROUND(AVG(kills_in_match), 2) AS avg_kills,
+    ROUND(STDDEV_SAMP(kills_in_match), 2) AS std_kills
+  FROM per_match
+  GROUP BY player
+)
+SELECT
+  player, matches_played, avg_kills, std_kills,
+  CASE WHEN avg_kills=0 THEN NULL ELSE ROUND(std_kills/avg_kills, 3) END AS coeff_var
+FROM agg
+WHERE matches_played >= {min_matches}
+ORDER BY coeff_var ASC, avg_kills DESC
+LIMIT {top_n};
+"""
+
+    
+    sql_mvp_leaders = f"""
+WITH per_match AS (
+  SELECT
+    `Match Name` AS match_name,
+    `Player`     AS player,
+    MAX(`Player Team`) AS team,
+    SUM(COALESCE(`Player Kills`,0)) AS kills_in_match,
+    SUM(COALESCE(`Enemy Kills`,0))  AS deaths_in_match
+  FROM kills
+  WHERE `Match Name` IS NOT NULL AND `Match Name` <> ''
+  GROUP BY `Match Name`, `Player`
+), ranked AS (
+  SELECT
+    per_match.*,
+    ROW_NUMBER() OVER (
+      PARTITION BY match_name
+      ORDER BY kills_in_match DESC, deaths_in_match ASC, player ASC
+    ) AS rk
+  FROM per_match
+)
+SELECT
+  player,
+  COUNT(*) AS mvp_count
+FROM ranked
+WHERE rk = 1
+GROUP BY player
+ORDER BY mvp_count DESC, player ASC
+LIMIT {top_n};
+"""
+
+  
+
+
+    sql_team_map_kd = f"""
+WITH base AS (
+  SELECT
+    `Map` AS map_name,
+    `Player Team` AS team,
+    SUM(COALESCE(`Player Kills`,0)) AS team_kills,
+    SUM(COALESCE(`Enemy Kills`,0))  AS team_deaths,
+    SUM(COALESCE(`Player Kills`,0)) / NULLIF(SUM(COALESCE(`Enemy Kills`,0)), 0) AS team_kd
+  FROM kills
+  WHERE `Map` IS NOT NULL AND `Map` <> ''
+    AND `Player Team` IS NOT NULL AND `Player Team` <> ''
+  GROUP BY `Map`, `Player Team`
+),
+ranked AS (
+  SELECT
+    base.*,
+    ROW_NUMBER() OVER (PARTITION BY map_name ORDER BY team_kd DESC, team_kills DESC) AS rk
+  FROM base
+)
+SELECT map_name, team, team_kills, team_deaths, ROUND(team_kd, 3) AS team_kd
+FROM ranked
+WHERE rk <= {top_n}
+ORDER BY map_name, rk;
+"""
+
+
 
     # ---------- Execute selected ----------
     if "global" in to_run:
@@ -231,6 +346,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if "tournament_stars" in to_run:
         save_df(run_query(conn, sql_tournament_stars), "tournament_stars")
 
+    if "team_map_kd" in to_run:
+        save_df(run_query(conn, sql_team_map_kd), "team_map_kd")
+    
+    if "map_specialists" in to_run:
+        save_df(run_query(conn, sql_map_specialists), "map_specialists")
+        
+    if "mvp_leaders" in to_run:
+        save_df(run_query(conn, sql_mvp_leaders), "mvp_leaders")
+    
+    if "consistency" in to_run:
+        save_df(run_query(conn, sql_consistency), "consistency")
+
+        
     conn.close()
     print(f"\nDone. CSVs saved to: {out_root}")
     return 0

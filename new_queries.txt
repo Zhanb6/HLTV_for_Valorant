@@ -6,13 +6,18 @@ python src/main.py --db valorant_stats --run team
 python src/main.py --db valorant_stats --run nemesis
 4.match_mvp
 python src/main.py --db valorant_stats --run mvp
-
-5.
-6.
-7.
-8.
-9.
-10.
+5.map_specialists
+python src/main.py --db valorant_stats --run map_specialists
+6.team_map_kd
+python src/main.py --db valorant_stats --run team_map_kd
+7.mvp leaders(how many times)
+python src/main.py --db valorant_stats --run mvp_leaders
+8.kd per map
+python src/main.py --db valorant_stats --run per_map
+9.tournament stars
+python src/main.py --db valorant_stats --run tournament_stars
+10.consistency just good 
+python src/main.py --db valorant_stats --run consistency    
 
 
 
