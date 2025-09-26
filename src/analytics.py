@@ -118,7 +118,45 @@ def bar_maps_played():
     plt.savefig("charts/bar_maps_played.png")
     plt.close()
     print(f"[OK] Maps played chart saved ({len(df)} rows)")
+    
+def scatter_multikill_vs_clutch():
+    sql = """
+    SELECT Player,
+           COALESCE(`2k`,0) + COALESCE(CAST(`3k` AS SIGNED),0) +
+           COALESCE(CAST(`4k` AS SIGNED),0) + COALESCE(CAST(`5k` AS SIGNED),0) AS multikills,
+           (COALESCE(CAST(`1v1` AS SIGNED),0) + COALESCE(CAST(`1v2` AS SIGNED),0) +
+            COALESCE(CAST(`1v3` AS SIGNED),0) + COALESCE(CAST(`1v4` AS SIGNED),0) +
+            COALESCE(CAST(`1v5` AS SIGNED),0)) AS clutches
+    FROM kills_stats;
+    """
+    df = run_query(sql)
+    df.plot.scatter(x="multikills", y="clutches")
+    plt.title("Зависимость мультикиллов и клатчей")
+    plt.xlabel("Количество мультикиллов (2k+3k+4k+5k)")
+    plt.ylabel("Выигранные клатчи (1vX)")
+    plt.tight_layout()
+    plt.savefig("charts/scatter_multikill_vs_clutch.png")
+    plt.close()
+    print(f"[OK] Scatter plot Multikills vs Clutches saved ({len(df)} rows)")
 
+
+
+def hist_multikills():
+    sql = """
+    SELECT Player,
+           COALESCE(`2k`,0) + COALESCE(CAST(`3k` AS SIGNED),0) +
+           COALESCE(CAST(`4k` AS SIGNED),0) + COALESCE(CAST(`5k` AS SIGNED),0) AS multikills
+    FROM kills_stats;
+    """
+    df = run_query(sql)
+    df["multikills"].plot.hist(bins=20)
+    plt.title("Распределение мультикиллов у игроков")
+    plt.xlabel("Количество мультикиллов")
+    plt.ylabel("Частота игроков")
+    plt.tight_layout()
+    plt.savefig("charts/hist_multikills.png")
+    plt.close()
+    print(f"[OK] Histogram Multikills saved ({len(df)} rows)")
 
 
 
@@ -240,14 +278,18 @@ if __name__ == "__main__":
     bar_maps_played()
     bar_agents_pick_rate()
     line_agents_by_stage()
-
+    hist_multikills()
+    scatter_multikill_vs_clutch()
+    
+    
+    
     # пример экспорта
     df1 = run_query("SELECT * FROM players_stats LIMIT 100;")
     df2 = run_query("SELECT * FROM kills_stats LIMIT 100;")
     export_to_excel({"Players": df1, "Kills": df2}, "valorant_report.xlsx")
 
     # интерактивный график (показывается в браузере)
-    plotly_line_agents_by_stage("Initiators")  # можно указать роль или None
+    plotly_line_agents_by_stage("Duelists")  # можно указать роль или None
 
 
 
