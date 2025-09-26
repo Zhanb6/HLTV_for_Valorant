@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 
 # Secrets
+
 db_config.py
 # Generated data
 *.csv
