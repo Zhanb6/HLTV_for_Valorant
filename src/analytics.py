@@ -190,12 +190,13 @@ def export_to_excel(dfs: dict, filename: str):
 
 
 # ---------------- PLOTLY TIME SLIDER ---------------- #
-roles = {
-    "Duelists": ["Phoenix", "Jett", "Reyna", "Raze", "Yoru", "Neon", "Iso"],
-    "Initiators": ["Breach", "Fade", "Gekko", "KAY/O", "Skye", "Sova", "Tejo"],
-    "Sentinels": ["Chamber", "Cypher", "Deadlock", "Killjoy", "Sage", "Vyse"],
-    "Controllers": ["Astra", "Brimstone", "Clove", "Harbor", "Omen", "Viper"]
+ROLES = {
+    "Duelists":   ["phoenix", "jett", "reyna", "raze", "yoru", "neon", "iso", "waylay"],
+    "Initiators": ["breach", "fade", "gekko", "kayo", "skye", "sova", "tejo"],
+    "Sentinels":  ["chamber", "cypher", "deadlock", "killjoy", "sage", "vyse"],
+    "Controllers":["astra", "brimstone", "clove", "harbor", "omen", "viper"]
 }
+
 
 
 def plotly_line_agents_by_stage(role=None):
@@ -207,19 +208,25 @@ def plotly_line_agents_by_stage(role=None):
     """
     df = run_query(sql)
 
-    # если роль указана → фильтруем только этих агентов
-    if role and role in roles:
-        df = df[df["Agent"].isin(roles[role])]
+    # приведение к нижнему регистру для надёжности
+    df["Agent_norm"] = df["Agent"].str.lower()
+
+    if role and role in ROLES:
+        df = df[df["Agent_norm"].isin(ROLES[role])]
+        title_suffix = f"(только {role})"
+    else:
+        title_suffix = "(все агенты)"
 
     fig = px.line(
         df,
         x="Stage",
         y="avg_pick_rate",
-        color="Agent",
+        color="Agent",  # оставляем оригинальные имена из БД
         markers=True,
-        title=f"Популярность агентов по стадиям турниров ({role if role else 'Все'})"
+        title=f"Популярность агентов по стадиям турниров {title_suffix}"
     )
     fig.show()
+
     
 
 
@@ -240,6 +247,7 @@ if __name__ == "__main__":
     export_to_excel({"Players": df1, "Kills": df2}, "valorant_report.xlsx")
 
     # интерактивный график (показывается в браузере)
-    plotly_line_agents_by_stage("Initiators")
+    plotly_line_agents_by_stage("Initiators")  # можно указать роль или None
+
 
 
