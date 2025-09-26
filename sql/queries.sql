@@ -179,3 +179,53 @@ GROUP BY map, team
 HAVING COUNT(*) >= 3
 ORDER BY winrate_pct DESC, games DESC
 LIMIT 30;
+
+
+/*Assignment 2 FOR Pie char and so on*/
+
+-- 1. Pie chart: распределение игроков по командам
+SELECT t.Team AS team_name, COUNT(p.Player) AS num_players
+FROM players_stats p
+JOIN teams_ids t ON p.Teams = t.Team
+JOIN players_ids pi ON p.Player = pi.Player
+GROUP BY t.Team;
+
+-- 2. Bar chart: средний рейтинг игроков по командам
+SELECT t.Team AS team_name, ROUND(AVG(p.Rating), 2) AS avg_rating
+FROM players_stats p
+JOIN teams_ids t ON p.Teams = t.Team
+JOIN players_ids pi ON p.Player = pi.Player
+GROUP BY t.Team
+ORDER BY avg_rating DESC;
+
+-- 3. Horizontal bar: топ-10 игроков по общему количеству убийств
+SELECT p.Player, SUM(p.Kills) AS total_kills, t.Team
+FROM players_stats p
+JOIN teams_ids t ON p.Teams = t.Team
+JOIN players_ids pi ON p.Player = pi.Player
+GROUP BY p.Player, t.Team
+ORDER BY total_kills DESC
+LIMIT 10;
+
+-- 4. Line chart: количество сыгранных карт командами по турнирам
+SELECT m.Tournament, t.Team, COUNT(m.Map) AS maps_played
+FROM maps_played m
+JOIN players_stats p ON m.Tournament = p.Tournament
+JOIN teams_ids t ON p.Teams = t.Team
+GROUP BY m.Tournament, t.Team
+ORDER BY m.Tournament;
+
+-- 5. Histogram: распределение количества сыгранных раундов у игроков
+SELECT p.Rounds_Played
+FROM players_stats p
+JOIN players_ids pi ON p.Player = pi.Player
+JOIN teams_ids t ON p.Teams = t.Team;
+
+-- 6. Scatter plot: зависимость K/D от количества сыгранных карт
+SELECT p.Player,
+       (p.Kills / NULLIF(p.Deaths,0)) AS kd_ratio,
+       p.Rounds_Played
+FROM players_stats p
+JOIN players_ids pi ON p.Player = pi.Player
+JOIN teams_ids t ON p.Teams = t.Team;
+
