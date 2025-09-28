@@ -119,25 +119,27 @@ def bar_maps_played():
     plt.close()
     print(f"[OK] Maps played chart saved ({len(df)} rows)")
     
-def scatter_multikill_vs_clutch():
+def scatter_kd_vs_acs():
     sql = """
-    SELECT Player,
-           COALESCE(`2k`,0) + COALESCE(CAST(`3k` AS SIGNED),0) +
-           COALESCE(CAST(`4k` AS SIGNED),0) + COALESCE(CAST(`5k` AS SIGNED),0) AS multikills,
-           (COALESCE(CAST(`1v1` AS SIGNED),0) + COALESCE(CAST(`1v2` AS SIGNED),0) +
-            COALESCE(CAST(`1v3` AS SIGNED),0) + COALESCE(CAST(`1v4` AS SIGNED),0) +
-            COALESCE(CAST(`1v5` AS SIGNED),0)) AS clutches
-    FROM kills_stats;
+    SELECT p.Player,
+           p.`Average Combat Score` AS acs,
+           p.Kills,
+           p.Deaths
+    FROM players_stats p;
     """
     df = run_query(sql)
-    df.plot.scatter(x="multikills", y="clutches")
-    plt.title("Зависимость мультикиллов и клатчей")
-    plt.xlabel("Количество мультикиллов (2k+3k+4k+5k)")
-    plt.ylabel("Выигранные клатчи (1vX)")
+
+    # считаем K/D (делим на 1, чтобы избежать деления на ноль)
+    df["kd_ratio"] = df["Kills"] / df["Deaths"].replace(0, 1)
+
+    df.plot.scatter(x="acs", y="kd_ratio")
+    plt.title("Зависимость K/D и Average Combat Score (ACS)")
+    plt.xlabel("Average Combat Score")
+    plt.ylabel("K/D ratio")
     plt.tight_layout()
-    plt.savefig("charts/scatter_multikill_vs_clutch.png")
+    plt.savefig("charts/scatter_kd_vs_acs.png")
     plt.close()
-    print(f"[OK] Scatter plot Multikills vs Clutches saved ({len(df)} rows)")
+    print(f"[OK] Scatter plot KD vs ACS saved ({len(df)} rows)")
 
 
 
@@ -237,33 +239,32 @@ ROLES = {
 
 
 
-def plotly_line_agents_by_stage(role=None):
+def plotly_time_slider():
     sql = """
-    SELECT Stage, Agent, AVG(CAST(`Pick Rate` AS DECIMAL(5,2))) AS avg_pick_rate
+    SELECT Tournament, Stage, Agent,
+           AVG(CAST(`Pick Rate` AS DECIMAL(6,2))) AS avg_pick_rate
     FROM agents_pick_rates
-    GROUP BY Stage, Agent
-    ORDER BY Stage;
+    GROUP BY Tournament, Stage, Agent
+    ORDER BY Tournament, Stage;
     """
     df = run_query(sql)
 
-    # приведение к нижнему регистру для надёжности
-    df["Agent_norm"] = df["Agent"].str.lower()
+    # выделим год из названия турнира
+    df["Year"] = df["Tournament"].str.extract(r"(\d{4})")
 
-    if role and role in ROLES:
-        df = df[df["Agent_norm"].isin(ROLES[role])]
-        title_suffix = f"(только {role})"
-    else:
-        title_suffix = "(все агенты)"
-
-    fig = px.line(
+    # строим scatter с ползунком
+    fig = px.scatter(
         df,
         x="Stage",
         y="avg_pick_rate",
-        color="Agent",  # оставляем оригинальные имена из БД
-        markers=True,
-        title=f"Популярность агентов по стадиям турниров {title_suffix}"
+        color="Agent",
+        animation_frame="Year",   # вот здесь появляется slider
+        size="avg_pick_rate",
+        hover_name="Agent",
+        title="Популярность агентов по стадиям (слайдер по годам)"
     )
-    fig.show()
+
+    fig.show()  # просто открывается в браузере
 
     
 
@@ -279,7 +280,7 @@ if __name__ == "__main__":
     bar_agents_pick_rate()
     line_agents_by_stage()
     hist_multikills()
-    scatter_multikill_vs_clutch()
+    scatter_kd_vs_acs()
     
     
     
@@ -289,7 +290,7 @@ if __name__ == "__main__":
     export_to_excel({"Players": df1, "Kills": df2}, "valorant_report.xlsx")
 
     # интерактивный график (показывается в браузере)
-    plotly_line_agents_by_stage("Duelists")  # можно указать роль или None
+    plotly_time_slider()  # можно указать роль или None
 
 
 

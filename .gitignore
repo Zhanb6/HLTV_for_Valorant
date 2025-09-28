@@ -9,7 +9,10 @@ db_config.py
 # Generated data
 *.csv
 # Ignore env files
+
 .env
 *.env
 .env.*
 !.env.example
+# Ignore generated charts
+charts/
