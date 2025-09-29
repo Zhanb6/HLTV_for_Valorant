@@ -87,7 +87,8 @@ def line_maps_played():
     JOIN teams_ids t ON p.Teams = t.Team
     JOIN players_ids pi ON p.Player = pi.Player
     GROUP BY p.Tournament, t.Team
-    ORDER BY p.Tournament;
+    ORDER BY p.Tournament
+    limit 10;
     """
     df = run_query(sql)
     pivot = df.pivot(index="Tournament", columns="Team", values="maps_played").fillna(0)
@@ -107,7 +108,8 @@ def bar_maps_played():
     SELECT Map, COUNT(*) AS times_played
     FROM maps_played
     GROUP BY Map
-    ORDER BY times_played DESC;
+    ORDER BY times_played DESC
+    limit 10;
     """
     df = run_query(sql)
     df.plot(kind="bar", x="Map", y="times_played", legend=False)
@@ -125,8 +127,9 @@ def scatter_kd_vs_acs():
            p.`Average Combat Score` AS acs,
            p.Kills,
            p.Deaths
-    FROM players_stats p;
-    """
+    FROM players_stats p
+    limit 10;
+        """
     df = run_query(sql)
 
     # считаем K/D (делим на 1, чтобы избежать деления на ноль)
