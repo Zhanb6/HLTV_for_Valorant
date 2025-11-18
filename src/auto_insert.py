@@ -1,53 +1,37 @@
-import os, time, random
-from dotenv import load_dotenv
-import mysql.connector as mysql
+import time, random, mysql.connector
+from datetime import datetime
 
-load_dotenv()
-
-CFG = dict(
-    host=os.getenv("DB_HOST", "localhost"),
-    port=int(os.getenv("DB_PORT", "3306")),
-    database=os.getenv("DB_NAME", "valorant_stats"),
-    user=os.getenv("DB_USER", "root"),
-    password=os.getenv("DB_PASS", ""),
-    autocommit=True,
+conn = mysql.connector.connect(
+    host="localhost",
+    user="root",
+    port="3306",
+    password="asikerka1024!",
+    database="valorant_stats",
+    autocommit=True
 )
+cur = conn.cursor()
 
-# --- фиксированный список игроков ---
-PLAYERS = ["aspas", "f0rsakeN", "Derke", "BuZz"]
+players = ["Jett", "Raze", "Phoenix", "Sova", "Reyna"]
+maps = ["Ascent", "Bind", "Haven", "Split", "Icebox"]
+weapons = ["Vandal", "Phantom", "Operator", "Spectre", "Sheriff"]
 
-def main(interval_sec=5):
-    conn = mysql.connect(**CFG)
-    cur = conn.cursor()
+match_id = random.randint(1000, 9999)
+round_no = 1
 
-    # создаём таблицу, если нет
+while True:
+    player = random.choice(players)
+    map_name = random.choice(maps)
+    weapon = random.choice(weapons)
+
+    base = 1 if player in ["Jett", "Reyna"] else 0
+    kills = base + random.randint(0, 3)
+    deaths = max(0, random.randint(0, 3 - base))
+
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS live_kills (
-          id BIGINT AUTO_INCREMENT PRIMARY KEY,
-          ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          player VARCHAR(128) NOT NULL,
-          kills INT NOT NULL,
-          deaths INT NOT NULL
-        );
-    """)
+        INSERT INTO live_kills (player, kills, deaths, map_name, weapon, ts)
+        VALUES (%s,%s,%s,%s,%s,%s)
+    """, (player, kills, deaths, map_name, weapon, datetime.now()))
 
-    print(f"[auto_insert] writing every {interval_sec}s. Ctrl+C to stop.")
-    try:
-        while True:
-            player = random.choice(PLAYERS)  # ← вот здесь выбор из списка
-            kills  = random.randint(5, 30)
-            deaths = random.randint(0, 20)
-            cur.execute(
-                "INSERT INTO live_kills (player, kills, deaths) VALUES (%s,%s,%s);",
-                (player, kills, deaths),
-            )
-            print(f"inserted: {player} k={kills} d={deaths}")
-            time.sleep(interval_sec)
-    except KeyboardInterrupt:
-        print("\n[auto_insert] stopped.")
-    finally:
-        cur.close()
-        conn.close()
+    print(f"[{datetime.now():%H:%M:%S}] {player} ({weapon}) on {map_name}: {kills}K/{deaths}D")
 
-if __name__ == "__main__":
-    main(5)  # интервал 5 секунд
+    time.sleep(8)
